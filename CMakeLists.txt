@@ -1,0 +1,5 @@
+project(membr2dexpl)
+cmake_minimum_required(VERSION 3.1)
+set(CUDA_NVCC_FLAGS_RELEASE "${CUDA_NVCC_FLAGS_RELEASE} \"-D_FORCE_INLINES\" ")
+find_package(CUDA REQUIRED)
+cuda_add_executable(${PROJECT_NAME} membr2dexpl.cu)
