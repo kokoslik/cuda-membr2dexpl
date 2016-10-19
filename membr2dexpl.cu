@@ -6,6 +6,9 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 //#define WRITE_TO_FILE
+#define NX 4
+#define NY 256
+
 using namespace std;
 typedef double(*func2)(double,double);
 typedef double(*func3)(double,double,double);
@@ -29,10 +32,9 @@ static void HandleError(cudaError_t err,
 
 __global__ void first_layer_kernel(double *U,double *Uprev,double tau,double a, int N1n,int N2n, double h1, double h2/*,func2 phi,func2 psi,func3 f*/)
 {
-    int tid=threadIdx.x+blockIdx.x*blockDim.x;
-    int i=tid/N2n+1;
-    int j=1+tid%(N2n-2);
-    if(i*N2n+j<(N1n-1)*N2n-1)
+    int i=threadIdx.x+blockIdx.x*blockDim.x+1;
+    int j=threadIdx.y+blockIdx.y*blockDim.y+1;
+    if((i < N1n-1)&&(j<N2n-1))
         U[i*N2n+j]=Uprev[i*N2n+j]+tau*PSI(i*h1,j*h2)+
                 tau*tau*0.5*F(i*h1,j*h2,0.0)+
                 a*a*tau*tau*0.5*((PHI((i+1)*h1,j*h2)-2.0*PHI(i*h1,j*h2)+PHI((i-1)*h1,j*h2))/(h1*h1)+(PHI(i*h1,(j+1)*h2)-2.0*PHI(i*h1,j*h2)+PHI(i*h1,(j-1)*h2))/(h2*h2));
@@ -41,10 +43,9 @@ __global__ void first_layer_kernel(double *U,double *Uprev,double tau,double a, 
 
 __global__ void main_kernel(double *U,double *Uprev,double *Unext,double tau,double a,double t, int N1n,int N2n, double h1, double h2/*,func2 phi,func2 psi,func3 f*/)
 {
-    int tid=threadIdx.x+blockIdx.x*blockDim.x;
-    int i=tid/N2n+1;
-    int j=1+tid%(N2n-2);
-    if(i*N2n+j<(N1n-1)*N2n-1)
+    int i=threadIdx.x+blockIdx.x*blockDim.x+1;
+    int j=threadIdx.y+blockIdx.y*blockDim.y+1;
+    if((i < N1n-1)&&(j<N2n-1))
         Unext[i*N2n+j]=2.0*U[i*N2n+j]-Uprev[i*N2n+j]+a*a*tau*tau*((U[(i+1)*N2n+j]-2.0*U[i*N2n+j]+U[(i-1)*N2n+j])/(h1*h1)+(U[i*N2n+(j+1)]-2.0*U[i*N2n+j]+U[i*N2n+(j-1)])/(h2*h2))+F(i*h1,j*h2,t);
 }
 
@@ -56,7 +57,7 @@ double solveGPU(double a,double L1,double L2,double T,double tau,int N1,int N2,f
     double t=tau;
     float gputime=0.0;
     size_t size=N1n*N2n*sizeof(double);
-    dim3 threads(1024,1,1),blocks((N1-1)*(N2-1)%1024==0?(N1-1)*(N2-1)/1024:(N1-1)*(N2-1)/1024+1,1,1);
+    dim3 threads(NX,NY,1),blocks((N1-1)%NX==0?(N1-1)/NX:(N1-1)/NX+1,(N2-1)%NY==0?(N2-1)/NY:(N2-1)/NY+1,1);
     Uloc=new double[N1n*N2n];
     HANDLE_ERROR( cudaMalloc(&U,size) );
     HANDLE_ERROR( cudaMalloc(&Unext,size) );
@@ -255,12 +256,19 @@ __host__ __device__ double init2(double x, double y)
     return exp(-((x-0.5)*(x-0.5)+(y-0.5)*(y-0.5))/2.0/sigma/sigma);
 }
 
+__host__ __device__ double init3(double x, double y)
+{
+    return (x-0.5)*(x-0.5)+(y-0.5)*(y-0.5)<0.25*0.25?1.0:0.0;
+}
+
 int main(int argc, char *argv[])
 {
     double cputime,gputime;
     cputime=solveCPU(1.0,1.0,1.0,0.1,0.0001,1000,1000,init,zero2,zero3);
+    //cputime=solveCPU(1.0,1.0,1.0,10,0.01,25,25,init2,zero2,zero3);
     cout<<"CPU time: "<<cputime<<endl;
     gputime=solveGPU(1.0,1.0,1.0,0.1,0.0001,1000,1000,init,zero2,zero3);
+    //gputime=solveGPU(1.0,1.0,1.0,10,0.01,25,25,init,zero2,zero3);
     cout<<"GPU time: "<<gputime<<endl;
     cout<<"Ratio: "<<cputime/gputime<<endl;
     return 0;
